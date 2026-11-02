@@ -84,6 +84,15 @@ nav button.on{color:var(--cyan)}nav button.on span{filter:none}
 .blk b{display:block;font-size:10.5px}.blk span{display:block;opacity:.85}
 .blk.wide{font-size:12px;padding:5px 8px}.blk.wide b{font-size:14px}
 .blk.activity{border-style:dashed}
+.tag.cv{background:rgba(94,231,255,.14);color:var(--cyan)}
+.tag.gone{background:rgba(255,107,129,.16);color:var(--danger)}
+a.cvlink{display:inline-block;margin-top:10px;color:var(--cyan);font-size:14px}
+.okmsg{color:#8affc1}.badmsg{color:var(--danger)}
+.lkrow{display:flex;gap:8px;align-items:center;margin:8px 0}
+.lkrow .lkname{flex:1;min-width:0;font-size:13px;overflow-wrap:anywhere}
+.lkrow select{margin-top:0;flex:1.2}
+.btn.sm{padding:10px 14px;font-size:14px;flex:0 0 auto}
+input[type=file]{padding:9px 12px}
 #overlay{position:fixed;inset:0;z-index:50;background:rgba(3,5,20,.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center}
 #overlay.open{display:flex}
 #sheet{width:100%;max-width:560px;max-height:92vh;max-height:92dvh;overflow:auto;background:linear-gradient(180deg,#151b48,#0c1030);border:1px solid var(--line);border-radius:24px 24px 0 0;padding:12px 18px calc(22px + env(safe-area-inset-bottom));animation:up .25s ease}
@@ -128,13 +137,13 @@ textarea{resize:vertical}
 
 <script>
 const $=s=>document.querySelector(s);
-const KEY='orbit-planner-v1',HH=48;
+const KEY='orbit-planner-v1',CKEY='orbit-canvas-v1',HH=48;
 const COLORS=[['#ff6b4a','Mars'],['#ffc857','Venus'],['#4cc9f0','Earth'],['#6d83ff','Neptune'],['#c77dff','Nebula'],['#5eead4','Aurora'],['#a3e635','Comet'],['#f472b6','Pulsar']];
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const TITLES={today:'Mission Control',cal:'Star Chart',tasks:'Task Orbit',classes:'Classes & Activities',settings:'Settings'};
-let S=load(),view='today',lastView='today',calMode='week',calDate=new Date(),taskFilter='open',calSY=null,calSX=0,calH0=7;
+let S=load(),view='today',lastView='today',calMode='week',calDate=new Date(),taskFilter='open',calSY=null,calSX=0,calH0=7,CS=loadCS(),syncing=false;
 
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.items)&&Array.isArray(d.tasks))return d}catch(e){}return{items:[],tasks:[]}}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.items)&&Array.isArray(d.tasks)){if(!Array.isArray(d.ignored))d.ignored=[];return d}}catch(e){}return{items:[],tasks:[],ignored:[]}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Could not save (storage full or blocked)')}}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -165,7 +174,7 @@ function taskRow(k){
   return `<div class="task ${cls}" data-act="edittask" data-id="${k.id}">
     <button class="check ${k.done?'on':''}" data-act="toggle" data-id="${k.id}" aria-label="Mark done">${k.done?'✓':''}</button>
     <div class="tbody"><div class="ttitle">${esc(k.title)}</div>
-    <div class="tmeta">${c?`<span class="tag" style="background:${hexA(c.color,.2)};color:${c.color}">${esc(c.name)}</span>`:''}<span class="due">${relDay(k.due)}${k.time?' · '+fmtT(k.time):''}</span></div></div>
+    <div class="tmeta">${c?`<span class="tag" style="background:${hexA(c.color,.2)};color:${c.color}">${esc(c.name)}</span>`:''}${k.src==='canvas'?'<span class="tag cv">Canvas</span>':''}${k.gone&&!k.done?'<span class="tag gone">Removed from Canvas?</span>':''}<span class="due">${relDay(k.due)}${k.time?' · '+fmtT(k.time):''}</span></div></div>
     ${k.pri===3&&!k.done?'<div>🔥</div>':''}</div>`;
 }
 function vToday(){
@@ -255,12 +264,24 @@ function vClasses(){
   const sec=(t,k,a)=>`<div class="sec"><h3>${t}</h3><button class="mini" data-act="newitem" data-k="${k}">+ Add</button></div>${a.length?a.map(row).join(''):`<div class="empty">No ${t.toLowerCase()} yet</div>`}`;
   return sec('Classes','class',cl)+sec('Activities','activity',ac)+(S.items.length?'':'<div style="text-align:center;margin-top:16px"><button class="mini" data-act="sample">Load sample data to explore</button></div>');
 }
+function canvasCards(){
+  let host='';try{host=new URL(CS.url).hostname}catch(e){}
+  const when=CS.lastOk?new Date(CS.lastOk).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  const status=syncing?'Syncing…':CS.msg?`<span class="${CS.ok?'okmsg':'badmsg'}">${esc(CS.msg)}</span>${CS.ok&&when?' · '+esc(when):''}`:'';
+  const opts=S.items.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  const labels=CS.labels.length?`<div class="lbl">Link these Canvas courses to your classes</div>${CS.labels.map((l,n)=>`<div class="lkrow"><div class="lkname">${esc(l)}</div><select id="lk_${n}"><option value="">Choose…</option>${opts}</select><button class="btn sm" data-act="cvlink" data-n="${n}">Link</button></div>`).join('')}`:'';
+  const main=CS.url
+    ?`<div class="card"><h4>🎓 Canvas sync</h4><div class="note">Connected to ${esc(host||'Canvas')}. The app checks for new and changed assignments when you open it (at most every 15 minutes).</div><div class="note" style="margin-top:8px">${status}</div>${labels}<div class="actions"><button class="btn primary" data-act="cvsync">Sync now</button><button class="btn danger" data-act="cvremove">Remove link</button></div></div>`
+    :`<div class="card"><h4>🎓 Canvas sync</h4><div class="note">Pulls your assignments and due dates from Canvas in as tasks. In Canvas open <b>Calendar</b>, tap <b>Calendar Feed</b> (bottom right) and copy the link. It is private, so it stays on this device only and is left out of backups.</div><input id="feedUrl" data-keep inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your Canvas calendar feed link"><div class="err">${status}</div><div class="actions"><button class="btn primary" data-act="cvsave">Save &amp; sync</button></div></div>`;
+  const imp=`<div class="card"><h4>📥 Import a Canvas calendar file</h4><div class="note">If automatic sync is blocked, open your feed link in a browser, save the .ics file, and choose it here (or paste its text). Tasks already imported are never duplicated.</div><label>Choose a .ics file<input type="file" id="icsFile" accept=".ics,text/calendar"></label><label>…or paste the file's text<textarea id="icsTxt" data-keep rows="3" placeholder="BEGIN:VCALENDAR…"></textarea></label><div class="actions"><button class="btn" data-act="icsimport">Import</button></div></div>`;
+  return main+imp;
+}
 function vSettings(){
-  return `<div class="card"><h4>💾 Back up your data</h4><div class="note">Your planner is saved on this phone, inside Safari. Clearing Safari website data would erase it, so back up now and then.</div>
+  return canvasCards()+`<div class="card"><h4>💾 Back up your data</h4><div class="note">Your planner is saved on this phone, inside Safari. Clearing Safari website data would erase it, so back up now and then. Your private Canvas link is not included in the backup.</div>
   <div class="actions"><button class="btn" data-act="copy">Copy backup</button><button class="btn" data-act="dl">Download file</button></div></div>
   <div class="card"><h4>♻️ Restore from backup</h4><textarea id="restoreTxt" rows="4" placeholder="Paste your backup text here"></textarea><div class="actions"><button class="btn" data-act="restore">Restore</button></div></div>
   <div class="card"><h4>🧪 Sample data</h4><div class="note">Adds a few example classes and tasks so you can see how everything looks.</div><div class="actions"><button class="btn" data-act="sample">Add sample data</button></div></div>
-  <div class="card"><h4>🗑️ Reset</h4><div class="note">Deletes every class, activity, and task on this device.</div><div class="actions"><button class="btn danger" data-act="wipe">Erase everything</button></div></div>
+  <div class="card"><h4>🗑️ Reset</h4><div class="note">Deletes every class, activity, and task on this device. Your Canvas link stays saved.</div><div class="actions"><button class="btn danger" data-act="wipe">Erase everything</button></div></div>
   <div class="card"><h4>📲 Home screen tip</h4><div class="note">In Safari tap Share → Add to Home Screen. Open it from the icon to get the full-screen app experience.</div></div>`;
 }
 
@@ -268,11 +289,13 @@ function vSettings(){
 function render(){
   const m=$('#main'),st=view===lastView?m.scrollTop:0;
   const cw=m.querySelector('.calwrap');if(cw){calSY=cw.scrollTop;calSX=cw.scrollLeft}
+  const keep={};m.querySelectorAll('[data-keep]').forEach(e=>{keep[e.id]=e.value});
   $('#title').textContent=TITLES[view];
   $('#sub').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
   m.className=view==='cal'?'cal':'';
   m.innerHTML=({today:vToday,cal:vCal,tasks:vTasks,classes:vClasses,settings:vSettings})[view]();
+  Object.keys(keep).forEach(id=>{const e=document.getElementById(id);if(e)e.value=keep[id]});
   m.scrollTop=st;lastView=view;
   $('#fab').style.display=view==='settings'?'none':'flex';
   if(view==='cal'){const w=m.querySelector('.calwrap');if(w){if(calSY==null)w.scrollTop=Math.max(0,(new Date().getHours()-calH0-1)*HH);else{w.scrollTop=calSY;w.scrollLeft=calSX}}}
@@ -281,24 +304,27 @@ function render(){
 /* ---------- FORMS ---------- */
 function itemForm(id,kind){
   const base=id?item(id):null;
-  const it=base?{...base,days:[...base.days]}:{kind:kind||'class',name:'',place:'',prof:'',color:COLORS[2][0],days:[],start:'09:00',end:'10:00'};
+  const it=base?{...base,days:[...base.days],code:base.code||'',links:[...(base.links||[])]}:{kind:kind||'class',name:'',place:'',prof:'',code:'',links:[],color:COLORS[2][0],days:[],start:'09:00',end:'10:00'};
   const isC=it.kind==='class';
   sheet(`<h2>${id?'Edit':'New'} ${isC?'class':'activity'}</h2>
   <label>Name<input id="f_name" value="${esc(it.name)}" placeholder="${isC?'e.g. Astronomy 101':'e.g. Robotics Club, Gym, Work'}"></label>
   <label>${isC?'Professor':'Details'}<input id="f_prof" value="${esc(it.prof)}"></label>
   <label>Location<input id="f_place" value="${esc(it.place)}"></label>
+  ${isC?`<label>Canvas course code (optional)<input id="f_code" value="${esc(it.code)}" placeholder="e.g. ABCD 1234" autocapitalize="characters" autocorrect="off"></label><div class="note" id="f_links"></div>`:''}
   <div class="lbl">Days</div><div class="chips" id="f_days">${DAYS.map((d,i)=>`<button type="button" class="chip ${it.days.includes(i)?'on':''}" data-d="${i}">${d}</button>`).join('')}</div>
   <div class="row"><label>Starts<input type="time" id="f_start" value="${it.start}"></label><label>Ends<input type="time" id="f_end" value="${it.end}"></label></div>
   <div class="lbl">Color</div><div class="swatches">${COLORS.map(([c,n])=>`<button type="button" class="sw ${c===it.color?'on':''}" data-c="${c}" title="${n}" style="background:${c};color:${c}"></button>`).join('')}</div>
   <div class="err" id="f_err"></div>
   <div class="actions">${id?'<button class="btn danger" id="f_del">Delete</button>':''}<button class="btn" id="f_cancel">Cancel</button><button class="btn primary" id="f_save">Save</button></div>`);
   const sh=$('#sheet');
+  const drawLinks=()=>{const el=$('#f_links');if(!el)return;el.innerHTML=it.links.length?`Linked Canvas courses: ${it.links.map(esc).join('; ')} <button type="button" class="mini" id="f_unlink">Unlink</button>`:'Used to match Canvas assignments to this class.';const b=$('#f_unlink');if(b)b.onclick=()=>{it.links=[];drawLinks()}};
+  drawLinks();
   sh.querySelectorAll('#f_days .chip').forEach(b=>b.onclick=()=>{const d=+b.dataset.d,k=it.days.indexOf(d);k<0?it.days.push(d):it.days.splice(k,1);b.classList.toggle('on')});
   sh.querySelectorAll('.sw').forEach(b=>b.onclick=()=>{it.color=b.dataset.c;sh.querySelectorAll('.sw').forEach(x=>x.classList.toggle('on',x===b))});
   $('#f_cancel').onclick=closeSheet;
   if(id)$('#f_del').onclick=()=>{if(confirm(`Delete "${it.name}"? Tasks linked to it will be kept.`)){S.items=S.items.filter(x=>x.id!==id);S.tasks.forEach(t=>{if(t.itemId===id)t.itemId=''});save();closeSheet();render()}};
   $('#f_save').onclick=()=>{
-    const v={kind:it.kind,name:$('#f_name').value.trim(),prof:$('#f_prof').value.trim(),place:$('#f_place').value.trim(),color:it.color,days:it.days.slice().sort(),start:$('#f_start').value,end:$('#f_end').value};
+    const v={kind:it.kind,name:$('#f_name').value.trim(),prof:$('#f_prof').value.trim(),place:$('#f_place').value.trim(),code:isC?$('#f_code').value.trim():it.code,links:it.links,color:it.color,days:it.days.slice().sort(),start:$('#f_start').value,end:$('#f_end').value};
     const err=!v.name?'Give it a name.':!v.days.length?'Pick at least one day.':(!v.start||!v.end||mins(v.end)<=mins(v.start))?'End time must be after the start time.':'';
     if(err){$('#f_err').textContent=err;return}
     if(id)Object.assign(item(id),v);else S.items.push({id:uid(),...v});
@@ -309,6 +335,7 @@ function taskForm(id){
   const old=id?S.tasks.find(x=>x.id===id):null;
   const t=old?{...old}:{title:'',itemId:'',due:ymd(addDays(today0(),1)),time:'',pri:2,notes:''};
   sheet(`<h2>${id?'Edit task':'New task'}</h2>
+  ${t.src==='canvas'?`<div class="note">Imported from Canvas${t.ccourse?' ('+esc(t.ccourse)+')':''}. If you change the title or due date here, syncing won't overwrite your change.</div>${/^https:\/\//.test(t.link||'')?`<a class="cvlink" href="${esc(t.link)}" target="_blank" rel="noopener noreferrer">Open in Canvas ↗</a>`:''}`:''}
   <label>What needs doing?<input id="t_title" value="${esc(t.title)}" placeholder="e.g. Lab report draft"></label>
   <label>Class / activity<select id="t_item"><option value="">None</option>${S.items.map(i=>`<option value="${i.id}" ${i.id===t.itemId?'selected':''}>${esc(i.name)}</option>`).join('')}</select></label>
   <div class="row"><label>Due date<input type="date" id="t_due" value="${t.due}"></label><label>Time (optional)<input type="time" id="t_time" value="${t.time||''}"></label></div>
@@ -318,18 +345,171 @@ function taskForm(id){
   <div class="actions">${id?'<button class="btn danger" id="t_del">Delete</button>':''}<button class="btn" id="t_cancel">Cancel</button><button class="btn primary" id="t_save">Save</button></div>`);
   document.querySelectorAll('#t_pri .chip').forEach(b=>b.onclick=()=>{t.pri=+b.dataset.p;document.querySelectorAll('#t_pri .chip').forEach(x=>x.classList.toggle('on',x===b))});
   $('#t_cancel').onclick=closeSheet;
-  if(id)$('#t_del').onclick=()=>{if(confirm('Delete this task?')){S.tasks=S.tasks.filter(x=>x.id!==id);save();closeSheet();render()}};
+  if(id)$('#t_del').onclick=()=>{if(confirm('Delete this task?')){forget(S.tasks.filter(x=>x.id===id));S.tasks=S.tasks.filter(x=>x.id!==id);save();closeSheet();render()}};
   $('#t_save').onclick=()=>{
     const v={title:$('#t_title').value.trim(),itemId:$('#t_item').value,due:$('#t_due').value,time:$('#t_time').value,pri:t.pri,notes:$('#t_notes').value.trim()};
     if(!v.title){$('#t_err').textContent='Give the task a name.';return}
     if(!v.due){$('#t_err').textContent='Pick a due date.';return}
-    if(id)Object.assign(old,v);else S.tasks.push({id:uid(),done:false,...v});
+    if(id){if(old.cid&&(v.title!==old.title||v.due!==old.due||v.time!==(old.time||'')))old.edited=true;Object.assign(old,v)}else S.tasks.push({id:uid(),done:false,...v});
     save();closeSheet();render();
   };
 }
 function addMenu(){
   sheet(`<h2>Add to your mission</h2><button class="btn big" data-m="class">🛰️ Class</button><button class="btn big" data-m="activity">✨ Activity / event</button><button class="btn big" data-m="task">☄️ Task or deadline</button>`);
   document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{const m=b.dataset.m;closeSheet();m==='task'?taskForm():itemForm(null,m)});
+}
+
+/* ---------- CANVAS SYNC ---------- */
+const POLL=15*60*1000;
+function loadCS(){
+  try{const d=JSON.parse(localStorage.getItem(CKEY));
+    if(d&&typeof d==='object')return{url:typeof d.url==='string'?d.url:'',lastTry:+d.lastTry||0,lastOk:+d.lastOk||0,ok:!!d.ok,msg:typeof d.msg==='string'?d.msg:'',labels:Array.isArray(d.labels)?d.labels.filter(x=>typeof x==='string'):[]}}catch(e){}
+  return{url:'',lastTry:0,lastOk:0,ok:false,msg:'',labels:[]};
+}
+function saveCS(){try{localStorage.setItem(CKEY,JSON.stringify(CS))}catch(e){}}
+const strip=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+const keysOf=s=>[...String(s==null?'':s).matchAll(/([A-Za-z]{2,6})[^A-Za-z0-9]*(\d{3,4}[A-Za-z]?)/g)].map(m=>(m[1]+m[2]).toUpperCase());
+function matchItem(label){
+  if(!label)return'';
+  const L=strip(label),lk=keysOf(label);
+  for(const i of S.items)if((i.links||[]).some(x=>strip(x)===L))return i.id;
+  for(const i of S.items)if(String(i.code||'').split(',').some(p=>p.trim()&&(strip(p)===L||keysOf(p).some(k=>lk.includes(k)))))return i.id;
+  return'';
+}
+function icsDate(v){
+  const m=/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(String(v).trim());
+  if(!m)return null;
+  if(m[4]===undefined)return{date:`${m[1]}-${m[2]}-${m[3]}`,time:''};
+  const a=[+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0)];
+  const d=m[7]?new Date(Date.UTC(...a)):new Date(...a);
+  return{date:ymd(d),time:pad(d.getHours())+':'+pad(d.getMinutes())};
+}
+function parseICS(text){
+  const lines=String(text).replace(/\r\n?/g,'\n').replace(/\n[ \t]/g,'').split('\n');
+  const evs=[];let cur=null;
+  for(const raw of lines){
+    const ln=raw.replace(/\s+$/,'');
+    if(ln==='BEGIN:VEVENT'){cur={uid:'',summary:'',date:'',time:'',url:'',cancelled:false};continue}
+    if(ln==='END:VEVENT'){if(cur&&cur.uid&&cur.date)evs.push(cur);cur=null;continue}
+    if(!cur)continue;
+    const k=ln.indexOf(':');if(k<1)continue;
+    const name=ln.slice(0,k).split(';')[0].toUpperCase(),val=ln.slice(k+1);
+    if(name==='UID')cur.uid=val.trim();
+    else if(name==='SUMMARY')cur.summary=val.replace(/\\n/gi,' ').replace(/\\([,;\\])/g,'$1').trim();
+    else if(name==='DTSTART'){const d=icsDate(val);if(d){cur.date=d.date;cur.time=d.time}}
+    else if(name==='URL')cur.url=val.trim();
+    else if(name==='STATUS')cur.cancelled=/CANCELLED/i.test(val);
+  }
+  return evs;
+}
+function splitSummary(s){
+  const m=/^(.*?)\s*\[([^\]]*)\]\s*$/.exec(s||'');
+  return{title:m&&m[1].trim()?m[1].trim():(s||'Untitled').trim(),label:m?m[2].trim():''};
+}
+function forget(list){list.forEach(k=>{if(k.cid&&!S.ignored.includes(k.cid))S.ignored.push(k.cid)})}
+function mergeCanvas(evs,src){
+  const td=ymd(today0());
+  let asg=evs.filter(e=>/assignment/i.test(e.uid));
+  if(!asg.length)asg=evs;
+  asg=asg.filter(e=>!e.cancelled);
+  const seen=new Set(),labels=new Set();let add=0,upd=0,gone=0;
+  asg.forEach(e=>{
+    seen.add(e.uid);
+    const{title,label}=splitSummary(e.summary);
+    if(label)labels.add(label);
+    if(S.ignored.includes(e.uid))return;
+    const itemId=matchItem(label),link=/^https:\/\//.test(e.url)?e.url:'';
+    const t=S.tasks.find(x=>x.cid===e.uid);
+    if(t){
+      let ch=false;
+      if(!t.edited){
+        if(t.title!==title){t.title=title;ch=true}
+        if(t.due!==e.date){t.due=e.date;ch=true}
+        if((t.time||'')!==e.time){t.time=e.time;ch=true}
+      }
+      t.ccourse=label;if(link)t.link=link;
+      if(!t.itemId&&itemId){t.itemId=itemId;ch=true}
+      if(t.gone){t.gone=false;ch=true}
+      if(ch)upd++;
+    }else if(e.date>=td){
+      S.tasks.push({id:uid(),title,itemId,due:e.date,time:e.time,pri:2,done:false,notes:'',src:'canvas',cid:e.uid,ccourse:label,link});
+      add++;
+    }
+  });
+  if(src==='feed'&&asg.length)S.tasks.forEach(t=>{if(t.src==='canvas'&&!t.done&&!t.gone&&t.due>=td&&!seen.has(t.cid)){t.gone=true;gone++}});
+  CS.labels=[...labels].filter(l=>!matchItem(l));
+  if(add||upd||gone)save();
+  return{add,upd,gone,n:asg.length};
+}
+function summarize(r){
+  if(!r.n)return'Connected, but no assignments were found in the feed.';
+  const p=[];if(r.add)p.push(r.add+' new');if(r.upd)p.push(r.upd+' updated');if(r.gone)p.push(r.gone+' removed from Canvas?');
+  return p.length?p.join(', '):'Up to date';
+}
+async function fetchFeed(url){
+  const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),15000);
+  try{
+    const r=await fetch(url,{credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',signal:ctl.signal});
+    if(!r.ok)throw{http:r.status};
+    return await r.text();
+  }finally{clearTimeout(to)}
+}
+async function syncNow(manual){
+  if(syncing)return;
+  if(!CS.url){if(manual)toast('Add your Canvas feed link first');return}
+  if(!manual&&Date.now()-CS.lastTry<POLL)return;
+  syncing=true;CS.lastTry=Date.now();saveCS();
+  if(view==='settings')render();
+  let stage='fetch';
+  try{
+    const txt=await fetchFeed(CS.url);
+    stage='read';
+    if(!/BEGIN:VCALENDAR/i.test(txt))throw{bad:1};
+    const r=mergeCanvas(parseICS(txt),'feed');
+    CS.ok=true;CS.lastOk=Date.now();CS.msg=summarize(r);
+    if(manual||r.add)toast('Canvas: '+CS.msg);
+  }catch(e){
+    CS.ok=false;
+    CS.msg=e&&e.http?`Canvas replied with error ${e.http}. Check that your feed link is still valid.`
+      :e&&e.bad?"That link didn't return a calendar. Check the feed link."
+      :stage==='read'?"Got the feed but couldn't read it."
+      :e&&e.name==='AbortError'?'Canvas took too long to respond.'
+      :"Couldn't reach Canvas from the app (you may be offline, or your school's Canvas blocks this). Use the import option below instead.";
+    if(manual)toast("Couldn't sync Canvas");
+  }finally{
+    syncing=false;saveCS();
+    const a=document.activeElement;
+    if(!(a&&$('#main').contains(a)&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))render();
+  }
+}
+function cvSave(){
+  const u=(($('#feedUrl')||{}).value||'').trim().replace(/^webcal:/i,'https:');
+  if(!/^https:\/\/[^\s]+$/i.test(u)){toast('Paste the full link (it starts with https://)');return}
+  CS.url=u;CS.lastOk=0;CS.msg='';CS.labels=[];saveCS();syncNow(true);
+}
+function cvLink(n){
+  const label=CS.labels[n],sel=$('#lk_'+n),it=sel&&sel.value?item(sel.value):null;
+  if(label==null)return;
+  if(!it){toast('Pick a class first');return}
+  it.links=Array.isArray(it.links)?it.links:[];
+  if(!it.links.includes(label))it.links.push(label);
+  S.tasks.forEach(t=>{if(t.src==='canvas'&&t.ccourse===label&&!t.itemId)t.itemId=it.id});
+  CS.labels.splice(n,1);saveCS();save();render();toast('Linked');
+}
+async function importICS(){
+  const f=$('#icsFile'),file=f&&f.files&&f.files[0];
+  let txt='';
+  try{txt=file?await file.text():(($('#icsTxt')||{}).value||'')}catch(e){}
+  if(!/BEGIN:VCALENDAR/i.test(txt)){toast("That doesn't look like a calendar file");return}
+  const r=mergeCanvas(parseICS(txt),'import');
+  saveCS();render();
+  toast(r.n?`Imported: ${r.add} new, ${r.upd} updated`:'No assignments found in that file');
+}
+function cleanData(d){
+  const okT=/^\d\d:\d\d$/,hex=/^#[0-9a-fA-F]{6}$/;
+  const items=d.items.filter(i=>i&&typeof i.id==='string'&&(i.kind==='class'||i.kind==='activity')&&typeof i.name==='string'&&Array.isArray(i.days)&&i.days.every(x=>Number.isInteger(x)&&x>=0&&x<=6)&&okT.test(i.start||'')&&okT.test(i.end||'')&&hex.test(i.color||''));
+  const tasks=d.tasks.filter(t=>t&&typeof t.id==='string'&&typeof t.title==='string'&&/^\d{4}-\d\d-\d\d$/.test(t.due||''));
+  return{items,tasks,ignored:Array.isArray(d.ignored)?d.ignored.filter(x=>typeof x==='string'):[],bad:d.items.length-items.length+d.tasks.length-tasks.length};
 }
 
 /* ---------- ACTIONS ---------- */
@@ -361,20 +541,26 @@ $('#main').addEventListener('click',e=>{
   else if(a==='caltoday'){calDate=new Date();render()}
   else if(a==='calmode'){calMode=calMode==='week'?'day':'week';render()}
   else if(a==='calday'){calDate=parse(t.dataset.d);calMode='day';render()}
-  else if(a==='cleardone'){if(confirm('Remove all completed tasks?')){S.tasks=S.tasks.filter(x=>!x.done);save();render()}}
+  else if(a==='cleardone'){if(confirm('Remove all completed tasks?')){forget(S.tasks.filter(x=>x.done));S.tasks=S.tasks.filter(x=>!x.done);save();render()}}
+  else if(a==='cvsave')cvSave();
+  else if(a==='cvsync')syncNow(true);
+  else if(a==='cvremove'){if(confirm('Remove your Canvas link? Tasks already imported will stay.')){CS.url='';CS.msg='';CS.ok=false;CS.lastOk=0;CS.labels=[];saveCS();render();toast('Canvas link removed')}}
+  else if(a==='cvlink')cvLink(+t.dataset.n);
+  else if(a==='icsimport')importICS();
   else if(a==='sample')sample();
   else if(a==='dl'){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'}),l=document.createElement('a');l.href=URL.createObjectURL(b);l.download='orbit-planner-backup.json';document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),1500)}
   else if(a==='copy'){const txt=backupText();(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast('Backup copied — paste it somewhere safe')).catch(()=>{const ta=$('#restoreTxt');ta.value=txt;ta.select();toast('Select all and copy the text')})}
   else if(a==='restore'){
-    try{const d=JSON.parse($('#restoreTxt').value);if(!Array.isArray(d.items)||!Array.isArray(d.tasks))throw 0;
-      if(confirm('Replace everything on this device with the backup?')){S={items:d.items,tasks:d.tasks};save();render();toast('Restored')}}
+    try{const d=JSON.parse($('#restoreTxt').value);if(!d||!Array.isArray(d.items)||!Array.isArray(d.tasks))throw 0;
+      const c=cleanData(d);
+      if(confirm('Replace everything on this device with the backup?'+(c.bad?`\n(${c.bad} unreadable entries will be skipped.)`:''))){S={items:c.items,tasks:c.tasks,ignored:c.ignored};save();render();toast(c.bad?`Restored (skipped ${c.bad})`:'Restored')}}
     catch(x){toast("That doesn't look like a valid backup")}
   }
-  else if(a==='wipe'){if(confirm('Erase ALL classes, activities, and tasks? This cannot be undone.')){S={items:[],tasks:[]};save();render();toast('Everything erased')}}
+  else if(a==='wipe'){if(confirm('Erase ALL classes, activities, and tasks? This cannot be undone.')){S={items:[],tasks:[],ignored:[]};save();render();toast('Everything erased')}}
 });
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{view=b.dataset.v;render()});
 $('#fab').onclick=()=>{view==='tasks'?taskForm():addMenu()};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){render();syncNow(false)}});
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 
 /* ---------- STARFIELD ---------- */
@@ -407,6 +593,7 @@ try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}ca
 })();
 
 render();
+syncNow(false);
 </script>
 </body>
 </html>
